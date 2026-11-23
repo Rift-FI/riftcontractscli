@@ -1,0 +1,208 @@
+{
+  "name": "premia-beta",
+  "chain": "base",
+  "artifacts": "../../vomma/contracts",
+  "saltNamespace": "premia-beta-v1:",
+  "vars": {
+    "gov": "0x8fC19fBc01DD9b9aEEa626c2AE980F710A390da7",
+    "keeperSigner": "0x8fC19fBc01DD9b9aEEa626c2AE980F710A390da7",
+    "reporter": "0x7AB104FE43968CBf2Ca4b571d0c64C9D8eefE67C",
+    "feeCreator": "0x8fC19fBc01DD9b9aEEa626c2AE980F710A390da7",
+    "feeReporterPool": "0x8fC19fBc01DD9b9aEEa626c2AE980F710A390da7",
+    "feeProtocol": "0x8fC19fBc01DD9b9aEEa626c2AE980F710A390da7",
+    "marketId": "keccak:PREMIA.NG.USDT.PREMIUM.V1",
+    "clusterId": 1,
+    "seedUsdc": "5000000@6",
+    "seedWad": "5000000e18",
+    "kWad": "500000e18",
+    "clusterPhiWad": "0.6e18",
+    "evidenceHash": "0xf537a339f70e54dbd12b4e4e8d6b6284f58bc535064f80ca54c163f278464c6c"
+  },
+  "steps": [
+    {
+      "id": "PrmUSD",
+      "label": "prmUSD — TEST token, no value",
+      "deploy": "PrmUSD",
+      "args": ["$gov"]
+    },
+    {
+      "id": "CollateralVault",
+      "deploy": "CollateralVault",
+      "args": ["$PrmUSD", "$gov", "0.75e18"]
+    },
+    {
+      "id": "FeeSplitter",
+      "deploy": "FeeSplitter",
+      "args": ["$PrmUSD", "$CollateralVault", "$gov"]
+    },
+    {
+      "id": "SettlementKeeper",
+      "deploy": "SettlementKeeper",
+      "args": ["$gov", "$keeperSigner"]
+    },
+    {
+      "id": "PushOracleAdapter",
+      "deploy": "PushOracleAdapter",
+      "args": ["$gov", "$reporter"]
+    },
+    {
+      "id": "MarketFactory",
+      "deploy": "MarketFactory",
+      "args": ["$gov", "$CollateralVault", "$PushOracleAdapter", "$FeeSplitter", "$SettlementKeeper"]
+    },
+
+    {
+      "id": "allow-vault",
+      "label": "allow-list the vault on the non-transferable mock token",
+      "call": "setProtocol(address account, bool allowed)",
+      "to": "$PrmUSD",
+      "args": ["$CollateralVault", true],
+      "check": { "to": "$PrmUSD", "fn": "isProtocol(address) view returns (bool)", "args": ["$CollateralVault"], "equals": true }
+    },
+    {
+      "id": "allow-feesplitter",
+      "call": "setProtocol(address account, bool allowed)",
+      "to": "$PrmUSD",
+      "args": ["$FeeSplitter", true],
+      "check": { "to": "$PrmUSD", "fn": "isProtocol(address) view returns (bool)", "args": ["$FeeSplitter"], "equals": true }
+    },
+
+    {
+      "id": "vault-setFactory",
+      "label": "lets the factory call registerMarket",
+      "call": "setFactory(address factory_)",
+      "to": "$CollateralVault",
+      "args": ["$MarketFactory"],
+      "check": { "to": "$CollateralVault", "fn": "factory() view returns (address)", "equals": "$MarketFactory" }
+    },
+    {
+      "id": "vault-setFeeSplitter",
+      "call": "setFeeSplitter(address feeSplitter_)",
+      "to": "$CollateralVault",
+      "args": ["$FeeSplitter"],
+      "check": { "to": "$CollateralVault", "fn": "feeSplitter() view returns (address)", "equals": "$FeeSplitter" }
+    },
+
+    {
+      "id": "mint-seed",
+      "label": "mock underwriting capital — TEST TOKEN, no value",
+      "call": "mint(address to, uint256 amount)",
+      "to": "$PrmUSD",
+      "args": ["$gov", "$seedUsdc"],
+      "check": {
+        "any": [
+          { "to": "$PrmUSD", "fn": "balanceOf(address) view returns (uint256)", "args": ["$gov"], "gte": "$seedUsdc" },
+          { "to": "$CollateralVault", "fn": "providedCapital(address) view returns (uint256)", "args": ["$gov"], "gte": "$seedWad" }
+        ]
+      }
+    },
+    {
+      "id": "approve-vault",
+      "call": "approve(address spender, uint256 value) returns (bool)",
+      "to": "$PrmUSD",
+      "args": ["$CollateralVault", "max"],
+      "check": { "to": "$PrmUSD", "fn": "allowance(address,address) view returns (uint256)", "args": ["$gov", "$CollateralVault"], "gte": "$seedUsdc" }
+    },
+    {
+      "id": "provide-capital",
+      "label": "E_0 — the equity every capacity cap is a fraction of",
+      "call": "provideCapital(uint256 amountUSDC)",
+      "to": "$CollateralVault",
+      "args": ["$seedUsdc"],
+      "check": { "to": "$CollateralVault", "fn": "providedCapital(address) view returns (uint256)", "args": ["$gov"], "gte": "$seedWad" }
+    },
+
+    {
+      "id": "cluster-cap",
+      "label": "cluster capacity cap — MUST precede allocateCapital",
+      "call": "setClusterCap(uint16 clusterId, uint256 phiWad)",
+      "to": "$CollateralVault",
+      "args": ["$clusterId", "$clusterPhiWad"],
+      "unverifiable": true,
+      "check": { "to": "$CollateralVault", "fn": "marketCapital(bytes32) view returns (uint256)", "args": ["$marketId"], "gte": "$kWad" }
+    },
+
+    {
+      "id": "deploy-market",
+      "label": "MarketFactory.deployMarket(flagship listing) — comes up DORMANT",
+      "call": "deployMarket((bytes32 marketId, (int256 mu, int256 floorF, int256 capC, uint32 tau, uint32 w, uint256 depthCoefficient, uint256 rho, uint32 hAge, uint256 cMin, uint256 kAttacker, uint16 clusterId) config, (uint32 windowW, int256 deltaD, int256 deltaW) jumpConfig, uint256 sourceFakeCost, uint256 kappaMinWad, uint256 kappaMaxWad, uint32 attestedSources, bytes32 attestationEvidenceHash, address creator, address reporterPool, address protocol) listing) returns (address market)",
+      "to": "$MarketFactory",
+      "args": [
+        {
+          "marketId": "$marketId",
+          "config": {
+            "mu": "0.03e18",
+            "floorF": "0.06e18",
+            "capC": "0.30e18",
+            "tau": 30,
+            "w": 7,
+            "depthCoefficient": "1e18",
+            "rho": "0.10e18",
+            "hAge": 180,
+            "cMin": "0.25e18",
+            "kAttacker": 3,
+            "clusterId": "$clusterId"
+          },
+          "jumpConfig": { "windowW": 5, "deltaD": "0.02e18", "deltaW": "0.06e18" },
+          "sourceFakeCost": "95000e18",
+          "kappaMinWad": "50000e18",
+          "kappaMaxWad": "200000e18",
+          "attestedSources": 5,
+          "attestationEvidenceHash": "$evidenceHash",
+          "creator": "$feeCreator",
+          "reporterPool": "$feeReporterPool",
+          "protocol": "$feeProtocol"
+        }
+      ],
+      "check": { "to": "$MarketFactory", "fn": "marketOf(bytes32) view returns (address)", "args": ["$marketId"], "nonZero": true }
+    },
+    {
+      "id": "market",
+      "label": "the PerpMarket address — plain CREATE from the factory, so nonce-derived",
+      "derive": { "create": { "from": "$MarketFactory", "nonce": 1 } },
+      "check": { "to": "$MarketFactory", "fn": "marketOf(bytes32) view returns (address)", "args": ["$marketId"], "equals": "$market" }
+    },
+
+    {
+      "id": "oracle-config",
+      "label": "2-day staleness, ±100% sanity band, n>=5 Healthy, k=3 Halt",
+      "call": "configureMarket(bytes32 marketId, (uint64 maxAgeSeconds, int256 xMin, int256 xMax, int256 maxMovePerPush, uint32 nMin, uint32 kMin) config)",
+      "to": "$PushOracleAdapter",
+      "args": [
+        "$marketId",
+        { "maxAgeSeconds": 172800, "xMin": "-1e18", "xMax": "1e18", "maxMovePerPush": "1e18", "nMin": 5, "kMin": 3 }
+      ],
+      "check": { "to": "$PushOracleAdapter", "fn": "configOf(bytes32) view returns (uint64,int256,int256,int256,uint32,uint32)", "args": ["$marketId"], "nonZero": true }
+    },
+    {
+      "id": "fee-recipients",
+      "call": "setRecipients(bytes32 marketId, address creator, address reporterPool, address protocol)",
+      "to": "$FeeSplitter",
+      "args": ["$marketId", "$feeCreator", "$feeReporterPool", "$feeProtocol"],
+      "check": { "to": "$FeeSplitter", "fn": "recipientsOf(bytes32) view returns (address,address,address)", "args": ["$marketId"], "nonZero": true }
+    },
+    {
+      "id": "keeper-addMarket",
+      "call": "addMarket(bytes32 marketId, address market)",
+      "to": "$SettlementKeeper",
+      "args": ["$marketId", "$market"],
+      "check": { "to": "$SettlementKeeper", "fn": "marketAddress(bytes32) view returns (address)", "args": ["$marketId"], "nonZero": true }
+    },
+
+    {
+      "id": "allocate-capital",
+      "label": "curve depth K (b = kappa * K)",
+      "call": "allocateCapital(bytes32 marketId, uint256 kWad)",
+      "to": "$CollateralVault",
+      "args": ["$marketId", "$kWad"],
+      "check": { "to": "$CollateralVault", "fn": "marketCapital(bytes32) view returns (uint256)", "args": ["$marketId"], "gte": "$kWad" }
+    },
+    {
+      "id": "activate",
+      "label": "activate() — re-checks the whole kappa_m + attestation gate; comes up FROZEN until the first oracle push",
+      "call": "activate()",
+      "to": "$market",
+      "unverifiable": true
+    }
+  ]
+}

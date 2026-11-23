@@ -1,0 +1,35 @@
+{
+  "name": "rift-wallet-cli",
+  "version": "1.0.0",
+  "description": "riftw — do any smart-contract interaction from the terminal, signed by your Rift passkey wallet over WalletConnect",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "commonjs",
+  "bin": {
+    "riftw": "bin/riftw.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "prepare": "npm run build",
+    "riftw": "node bin/riftw.js",
+    "test": "npm run build && node bin/riftw.js selftest"
+  },
+  "dependencies": {
+    "@walletconnect/sign-client": "2.26.0",
+    "ethers": "6.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2"
+  }
+}
